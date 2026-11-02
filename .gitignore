@@ -13,3 +13,4 @@ test-vault/
 *.sqlite3*
 *.db
 **/gen/
+/main.js

@@ -1,0 +1,2 @@
+import {build} from 'esbuild';import {mkdir} from 'node:fs/promises';import {spawnSync} from 'node:child_process';
+await mkdir('.test',{recursive:true});await build({entryPoints:['tests/layout-comparison.ts'],bundle:true,platform:'node',format:'esm',outfile:'.test/layout-comparison.mjs'});const r=spawnSync(process.execPath,['.test/layout-comparison.mjs'],{stdio:'inherit'});process.exitCode=r.status??1;

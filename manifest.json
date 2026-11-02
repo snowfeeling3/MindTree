@@ -1,0 +1,9 @@
+{
+  "id": "mindtree",
+  "name": "MindTree",
+  "version": "0.9.2",
+  "minAppVersion": "1.8.7",
+  "description": "Markdown-native mindmaps with multiple note repositories and independent series.",
+  "author": "MindTree contributors",
+  "isDesktopOnly": false
+}

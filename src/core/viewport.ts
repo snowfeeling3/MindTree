@@ -1,0 +1,6 @@
+import {Positioned} from './graph';
+export interface Camera {x:number;y:number;zoom:number}
+export function zoomAt(c:Camera,z:number,x:number,y:number):Camera {const zoom=Math.max(.001,Math.min(4,z));return {zoom,x:x-(x-c.x)*zoom/c.zoom,y:y-(y-c.y)*zoom/c.zoom};}
+export function anchor(c:Camera,before:{x:number;y:number},after:{x:number;y:number}):Camera{return {...c,x:c.x+(before.x-after.x)*c.zoom,y:c.y+(before.y-after.y)*c.zoom};}
+export function fit(nodes:Positioned[],w:number,h:number):Camera {if(!nodes.length)return {x:w/2,y:h/2,zoom:1};let l=Infinity,r=-Infinity,t=Infinity,b=-Infinity;for(const p of nodes){l=Math.min(l,p.x);r=Math.max(r,p.x+200);t=Math.min(t,p.y-24);b=Math.max(b,p.y+24);}const zoom=Math.max(.08,Math.min(1.3,(w-96)/Math.max(1,r-l),(h-96)/Math.max(1,b-t)));return {zoom,x:w/2-(l+r)*zoom/2,y:h/2-(t+b)*zoom/2};}
+export function transformLayout(nodes:Positioned[],mode:string):Positioned[]{if(mode==='vertical')return nodes.map(p=>({...p,x:p.y*3,y:p.x*.55}));if(mode!=='branches'||!nodes.length)return nodes;const root=nodes[0],side=new Map<string,number>();let count=0;return nodes.map(p=>{if(!p.parent)return p;const direction=p.parent===root.node.id?(++count%2?1:-1):side.get(p.parent)??1;side.set(p.node.id,direction);return {...p,x:direction===1?p.x:-p.x};});}

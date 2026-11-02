@@ -1,0 +1,34 @@
+import type {Tile} from './adaptive';
+export interface Point {x:number;y:number}
+export interface Route {id:string;parent:string;owners:string[];d:string;points:Point[];kind:'curve'|'stem'|'trunk'|'branch'}
+const distance=(a:Point,b:Point)=>Math.hypot(a.x-b.x,a.y-b.y);
+export const routeLength=(r:Route)=>r.points.slice(1).reduce((v,p,i)=>v+distance(r.points[i],p),0);
+/** Segment vs open rectangle. Touching a label boundary is allowed. */
+export function hitsBox(a:Point,b:Point,n:Tile):boolean {let lo=0,hi=1;const eps=.01;for(const [start,delta,min,max] of [[a.x,b.x-a.x,n.x+eps,n.x+n.width-eps],[a.y,b.y-a.y,n.y-n.height/2+eps,n.y+n.height/2-eps]]){if(Math.abs(delta)<1e-9){if(start<=min||start>=max)return false;}else{let t0=(min-start)/delta,t1=(max-start)/delta;if(t0>t1)[t0,t1]=[t1,t0];lo=Math.max(lo,t0);hi=Math.min(hi,t1);if(lo>=hi)return false;}}return hi>0&&lo<1;}
+export function properCross(a:Point,b:Point,c:Point,d:Point):boolean {const cross=(p:Point,q:Point,r:Point)=>(q.x-p.x)*(r.y-p.y)-(q.y-p.y)*(r.x-p.x);return cross(a,b,c)*cross(a,b,d)<-1e-8&&cross(c,d,a)*cross(c,d,b)<-1e-8;}
+function curve(parent:Tile,child:Tile,tree:boolean,clipped=false):Route {
+ const left=child.x<parent.x,pc={x:parent.x+parent.width/2,y:parent.y},cc={x:child.x+child.width/2,y:child.y};
+ const port=(n:Tile,to:Point)=>{const cx=n.x+n.width/2,dx=to.x-cx,dy=to.y-n.y;if(!dx&&!dy)return {x:cx,y:n.y};const scale=Math.min(dx?Math.abs(n.width/2/dx):Infinity,dy?Math.abs(n.height/2/dy):Infinity);return {x:cx+dx*scale,y:n.y+dy*scale};};
+ const a=clipped?port(parent,cc):{x:tree?(left?parent.x:parent.x+parent.width):pc.x,y:pc.y};const b=clipped?port(child,pc):{x:tree?(left?child.x+child.width:child.x):cc.x,y:cc.y};const points:Point[]=[];let d='';
+ if(clipped){const length=distance(a,b),offset=Math.min(8,length*.035),control={x:(a.x+b.x)/2-(b.y-a.y)/(length||1)*offset,y:(a.y+b.y)/2+(b.x-a.x)/(length||1)*offset};d=`M${a.x},${a.y} Q${control.x},${control.y} ${b.x},${b.y}`;for(let i=0;i<=16;i++){const t=i/16,u=1-t;points.push({x:u*u*a.x+2*u*t*control.x+t*t*b.x,y:u*u*a.y+2*u*t*control.y+t*t*b.y});}}
+ else {const mid=(a.x+b.x)/2;d=`M${a.x},${a.y} C${mid},${a.y} ${mid},${b.y} ${b.x},${b.y}`;for(let i=0;i<=32;i++){const t=i/32,u=1-t;points.push({x:u*u*u*a.x+3*u*u*t*mid+3*u*t*t*mid+t*t*t*b.x,y:u*u*u*a.y+3*u*u*t*a.y+3*u*t*t*b.y+t*t*t*b.y});}}
+ return {id:'edge:'+child.id,parent:parent.id,owners:[child.id],d,points,kind:'curve'};
+}
+export function legacyRoutes(nodes:Tile[],tree:boolean):Route[]{const map=new Map(nodes.map(n=>[n.id,n]));return nodes.filter(n=>n.parent&&map.has(n.parent)).map(n=>curve(map.get(n.parent!)!,n,tree));}
+class LabelIndex {private cells=new Map<string,Set<Tile>>();constructor(private nodes:Tile[]){for(const n of nodes)for(let x=Math.floor(n.x/128);x<=Math.floor((n.x+n.width)/128);x++)for(let y=Math.floor((n.y-n.height/2)/128);y<=Math.floor((n.y+n.height/2)/128);y++){const key=x+','+y;const set=this.cells.get(key)??new Set<Tile>();set.add(n);this.cells.set(key,set);}}
+ candidates(r:Route):Tile[]{const xs=r.points.map(p=>p.x),ys=r.points.map(p=>p.y),x0=Math.floor(Math.min(...xs)/128),x1=Math.floor(Math.max(...xs)/128),y0=Math.floor(Math.min(...ys)/128),y1=Math.floor(Math.max(...ys)/128);if((x1-x0+1)*(y1-y0+1)>this.nodes.length*4)return this.nodes;const found=new Set<Tile>();for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++)for(const n of this.cells.get(x+','+y)??[])found.add(n);return [...found];}
+ hits(r:Route):number {let count=0;for(const n of this.candidates(r)){if(n.id===r.parent||r.owners.includes(n.id))continue;if(r.points.some((p,i)=>i>0&&hitsBox(r.points[i-1],p,n)))count++;}return count;}}
+function line(id:string,parent:string,owners:string[],a:Point,b:Point,kind:Route['kind']):Route{return {id,parent,owners,d:`M${a.x},${a.y} L${b.x},${b.y}`,points:[a,b],kind};}
+/** Build one graph of shared strokes, instead of drawing the same trunk for every child. */
+function bus(parent:Tile,children:Tile[],sign:number):Route[]{const port=sign>0?parent.x+parent.width:parent.x;const end=(n:Tile)=>sign>0?n.x:n.x+n.width;const gap=Math.min(...children.map(n=>Math.abs(end(n)-port)));const trunk=port+sign*gap/2,all=children.map(n=>n.id),out:Route[]=[];
+ out.push(line('stem:'+parent.id+':'+sign,parent.id,all,{x:port,y:parent.y},{x:trunk,y:parent.y},'stem'));
+ const stops=[...new Set([parent.y,...children.map(n=>n.y)])].sort((a,b)=>a-b);for(let i=1;i<stops.length;i++){const lo=stops[i-1],hi=stops[i],mid=(lo+hi)/2,owners=children.filter(n=>mid>Math.min(parent.y,n.y)&&mid<Math.max(parent.y,n.y)).map(n=>n.id);if(owners.length)out.push(line('trunk:'+parent.id+':'+sign+':'+i,parent.id,owners,{x:trunk,y:lo},{x:trunk,y:hi},'trunk'));}
+ for(const n of children)out.push(line('branch:'+n.id,parent.id,[n.id],{x:trunk,y:n.y},{x:end(n),y:n.y},'branch'));return out.filter(r=>routeLength(r)>.001);}
+export function routeEdges(nodes:Tile[],tree:boolean):Route[]{const map=new Map(nodes.map(n=>[n.id,n])),labels=new LabelIndex(nodes),groups=new Map<string,Tile[]>();for(const n of nodes)if(n.parent&&map.has(n.parent)){const key=n.parent+':'+(n.x<map.get(n.parent)!.x?-1:1);const group=groups.get(key)??[];group.push(n);groups.set(key,group);}
+ const result:Route[]=[];for(const children of groups.values()){const parent=map.get(children[0].parent!)!,old=children.map(n=>curve(parent,n,tree));if(tree&&children.length>=3){const shared=bus(parent,children,children[0].x<parent.x?-1:1);if(shared.reduce((s,r)=>s+routeLength(r),0)<old.reduce((s,r)=>s+routeLength(r),0)*.95&&shared.every(r=>labels.hits(r)===0)){result.push(...shared);continue;}}
+ for(let i=0;i<children.length;i++){const alternative=curve(parent,children[i],tree,true),original=old[i];result.push(routeLength(alternative)<routeLength(original)&&labels.hits(alternative)<=labels.hits(original)?alternative:original);}}
+ return result;}
+export function routeMetrics(routes:Route[],nodes:Tile[]){const labels=new LabelIndex(nodes);return {length:routes.reduce((s,r)=>s+routeLength(r),0),longest:Math.max(0,...routes.map(routeLength)),labelHits:routes.reduce((s,r)=>s+labels.hits(r),0),strokes:routes.length};}
+
+/** Proper crossings only: shared endpoints and collinear shared strokes are not crossings. */
+export function crossingCount(routes:Route[]):number {const segments=routes.flatMap((r,index)=>r.points.slice(1).map((b,i)=>({a:r.points[i],b,index,minX:Math.min(r.points[i].x,b.x),maxX:Math.max(r.points[i].x,b.x),minY:Math.min(r.points[i].y,b.y),maxY:Math.max(r.points[i].y,b.y)}))).sort((a,b)=>a.minX-b.minX);let count=0;let active:typeof segments=[];for(const segment of segments){active=active.filter(other=>other.maxX>=segment.minX);for(const other of active)if(other.index!==segment.index&&other.maxY>=segment.minY&&other.minY<=segment.maxY&&properCross(other.a,other.b,segment.a,segment.b))count++;active.push(segment);}return count;}

@@ -1,0 +1,1 @@
+export class Notice {} export class Menu {}
